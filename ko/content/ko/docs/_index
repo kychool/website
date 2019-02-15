@@ -1,5 +1,4 @@
 ---
-title: kubefed
-weight: 20
-toc-hide: true
+title: "Bootstrapping Clusters with kubeadm"
+weight: 30
 ---
