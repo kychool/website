@@ -1,0 +1,3 @@
+files:
+  - source: content/en/docs
+    translation: content/ko/docs/%file_name%
