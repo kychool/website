@@ -1,53 +1,166 @@
 ---
 reviewers:
   - jessfraz
-title: Pod Preset
-content_template: templates/concept
-weight: 50
+title: Inject Information into Pods Using a PodPreset
+content_template: templates/task
+weight: 60
 ---
 
-{{% capture overview %}} This page provides an overview of PodPresets, which are objects for injecting certain information into pods at creation time. The information can include secrets, volumes, volume mounts, and environment variables. {{% /capture %}}
+{{% capture overview %}}
 
-{{% capture body %}}
-
-## Understanding Pod Presets
-
-A `Pod Preset` is an API resource for injecting additional runtime requirements into a Pod at creation time. You use [label selectors](/docs/concepts/overview/working-with-objects/labels/#label-selectors) to specify the Pods to which a given Pod Preset applies.
-
-Using a Pod Preset allows pod template authors to not have to explicitly provide all information for every pod. This way, authors of pod templates consuming a specific service do not need to know all the details about that service.
-
-For more information about the background, see the [design proposal for PodPreset](https://git.k8s.io/community/contributors/design-proposals/service-catalog/pod-preset.md).
-
-## How It Works
-
-Kubernetes provides an admission controller (`PodPreset`) which, when enabled, applies Pod Presets to incoming pod creation requests. When a pod creation request occurs, the system does the following:
-
-1. Retrieve all `PodPresets` available for use.
-2. Check if the label selectors of any `PodPreset` matches the labels on the pod being created.
-3. Attempt to merge the various resources defined by the `PodPreset` into the Pod being created.
-4. On error, throw an event documenting the merge error on the pod, and create the pod *without* any injected resources from the `PodPreset`.
-5. Annotate the resulting modified Pod spec to indicate that it has been modified by a `PodPreset`. The annotation is of the form `podpreset.admission.kubernetes.io/podpreset-<pod-preset name>: "<resource version>"`.
-
-Each Pod can be matched by zero or more Pod Presets; and each `PodPreset` can be applied to zero or more pods. When a `PodPreset` is applied to one or more Pods, Kubernetes modifies the Pod Spec. For changes to `Env`, `EnvFrom`, and `VolumeMounts`, Kubernetes modifies the container spec for all containers in the Pod; for changes to `Volume`, Kubernetes modifies the Pod Spec.
-
-{{< note >}} A Pod Preset is capable of modifying the `.spec.containers` field in a Pod spec when appropriate. *No* resource definition from the Pod Preset will be applied to the `initContainers` field. {{< /note >}}
-
-### Disable Pod Preset for a Specific Pod
-
-There may be instances where you wish for a Pod to not be altered by any Pod Preset mutations. In these cases, you can add an annotation in the Pod Spec of the form: `podpreset.admission.kubernetes.io/exclude: "true"`.
-
-## Enable Pod Preset
-
-In order to use Pod Presets in your cluster you must ensure the following:
-
-1. You have enabled the API type `settings.k8s.io/v1alpha1/podpreset`. For example, this can be done by including `settings.k8s.io/v1alpha1=true` in the `--runtime-config` option for the API server.
-2. You have enabled the admission controller `PodPreset`. One way to doing this is to include `PodPreset` in the `--enable-admission-plugins` option value specified for the API server.
-3. You have defined your Pod Presets by creating `PodPreset` objects in the namespace you will use.
+You can use a `PodPreset` object to inject information like secrets, volume mounts, and environment variables etc into pods at creation time. This task shows some examples on using the `PodPreset` resource.
 
 {{% /capture %}}
 
-{{% capture whatsnext %}}
+{{% capture prerequisites %}}
 
-* [Injecting data into a Pod using PodPreset](/docs/tasks/inject-data-application/podpreset/)
+Get an overview of PodPresets at [Understanding Pod Presets](/docs/concepts/workloads/pods/podpreset/).
+
+{{< include "task-tutorial-prereqs.md" >}} {{< version-check >}}
+
+{{% /capture %}}
+
+{{% capture steps %}}
+
+## Simple Pod Spec Example
+
+This is a simple example to show how a Pod spec is modified by the Pod Preset.
+
+{{< codenew file="podpreset/preset.yaml" >}}
+
+Create the PodPreset:
+
+```shell
+kubectl create -f https://k8s.io/examples/podpreset/preset.yaml
+```
+
+Examine the created PodPreset:
+
+```shell
+$ kubectl get podpreset
+NAME             AGE
+allow-database   1m
+```
+
+The new PodPreset will act upon any pod that has label `role: frontend`.
+
+{{< codenew file="podpreset/pod.yaml" >}}
+
+Create a pod:
+
+```shell
+$ kubectl create -f https://k8s.io/examples/podpreset/pod.yaml
+```
+
+List the running Pods:
+
+```shell
+$ kubectl get pods
+NAME      READY     STATUS    RESTARTS   AGE
+website   1/1       Running   0          4m
+```
+
+**Pod spec after admission controller:**
+
+{{< codenew file="podpreset/merged.yaml" >}}
+
+To see above output, run the following command:
+
+```shell
+$ kubectl get pod website -o yaml
+```
+
+## Pod Spec with ConfigMap Example
+
+This is an example to show how a Pod spec is modified by the Pod Preset that defines a `ConfigMap` for Environment Variables.
+
+**User submitted pod spec:**
+
+{{< codenew file="podpreset/pod.yaml" >}}
+
+**User submitted `ConfigMap`:**
+
+{{< codenew file="podpreset/configmap.yaml" >}}
+
+**Example Pod Preset:**
+
+{{< codenew file="podpreset/allow-db.yaml" >}}
+
+**Pod spec after admission controller:**
+
+{{< codenew file="podpreset/allow-db-merged.yaml" >}}
+
+## ReplicaSet with Pod Spec Example
+
+The following example shows that only the pod spec is modified by the Pod Preset.
+
+**User submitted ReplicaSet:**
+
+{{< codenew file="podpreset/replicaset.yaml" >}}
+
+**Example Pod Preset:**
+
+{{< codenew file="podpreset/preset.yaml" >}}
+
+**Pod spec after admission controller:**
+
+Note that the ReplicaSet spec was not changed, users have to check individual pods to validate that the PodPreset has been applied.
+
+{{< codenew file="podpreset/replicaset-merged.yaml" >}}
+
+## Multiple PodPreset Example
+
+This is an example to show how a Pod spec is modified by multiple Pod Injection Policies.
+
+**User submitted pod spec:**
+
+{{< codenew file="podpreset/pod.yaml" >}}
+
+**Example Pod Preset:**
+
+{{< codenew file="podpreset/preset.yaml" >}}
+
+**Another Pod Preset:**
+
+{{< codenew file="podpreset/proxy.yaml" >}}
+
+**Pod spec after admission controller:**
+
+{{< codenew file="podpreset/multi-merged.yaml" >}}
+
+## Conflict Example
+
+This is an example to show how a Pod spec is not modified by the Pod Preset when there is a conflict.
+
+**User submitted pod spec:**
+
+{{< codenew file="podpreset/conflict-pod.yaml" >}}
+
+**Example Pod Preset:**
+
+{{< codenew file="podpreset/conflict-preset.yaml" >}}
+
+**Pod spec after admission controller will not change because of the conflict:**
+
+{{< codenew file="podpreset/conflict-pod.yaml" >}}
+
+**If we run `kubectl describe...` we can see the event:**
+
+```shell
+$ kubectl describe ...
+....
+Events:
+  FirstSeen             LastSeen            Count   From                    SubobjectPath               Reason      Message
+  Tue, 07 Feb 2017 16:56:12 -0700   Tue, 07 Feb 2017 16:56:12 -0700 1   {podpreset.admission.kubernetes.io/podpreset-allow-database }    conflict  Conflict on pod preset. Duplicate mountPath /cache.
+```
+
+## Deleting a Pod Preset
+
+Once you don't need a pod preset anymore, you can delete it with `kubectl`:
+
+```shell
+$ kubectl delete podpreset allow-database
+podpreset "allow-database" deleted
+```
 
 {{% /capture %}}
