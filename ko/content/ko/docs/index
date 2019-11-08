@@ -1,4 +1,17 @@
 ---
-title: v1.13
+headless: true
+resources:
+  - 
+    src: "*alpha*"
+    title: "alpha"
+  - 
+    src: "*beta*"
+    title: "beta"
+  - 
+    src: "*deprecated*"
+    title: "deprecated"
+  - 
+    src: "*stable*"
+    title: "stable"
 ---
-[Kubernetes API v1.13](/docs/reference/generated/kubernetes-api/v1.13/)
+
