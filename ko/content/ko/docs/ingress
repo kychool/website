@@ -1,152 +1,407 @@
 ---
-title: Federated Ingress
-content_template: templates/task
+reviewers:
+  - bprashanth
+title: Ingress
+content_template: templates/concept
+weight: 40
 ---
-{{% capture overview %}}
 
-{{< note >}} {{< include "federation-current-state.md" >}} {{< /note >}}
+{{% capture overview %}} {{< glossary_definition term_id="ingress" length="all" >}} {{% /capture %}}
 
-This page explains how to use Kubernetes Federated Ingress to deploy a common HTTP(S) virtual IP load balancer across a federated service running in multiple Kubernetes clusters. As of v1.4, clusters hosted in Google Cloud (both Google Kubernetes Engine and GCE, or both) are supported. This makes it easy to deploy a service that reliably serves HTTP(S) traffic originating from web clients around the globe on a single, static IP address. Low network latency, high fault tolerance and easy administration are ensured through intelligent request routing and automatic replica relocation (using [Federated ReplicaSets](/docs/tasks/administer-federation/replicaset/). Clients are automatically routed, via the shortest network path, to the cluster closest to them with available capacity (despite the fact that all clients use exactly the same static IP address). The load balancer automatically checks the health of the pods comprising the service, and avoids sending requests to unresponsive or slow pods (or entire unresponsive clusters).
+{{% capture body %}}
 
-Federated Ingress is released as an alpha feature, and supports Google Cloud Platform (Google Kubernetes Engine, GCE and hybrid scenarios involving both) in Kubernetes v1.4. Work is under way to support other cloud providers such as AWS, and other hybrid cloud scenarios (e.g. services spanning private on-premises as well as public cloud Kubernetes clusters).
+## Terminology
 
-You create Federated Ingresses in much that same way as traditional [Kubernetes Ingresses](/docs/concepts/services-networking/ingress/): by making an API call which specifies the desired properties of your logical ingress point. In the case of Federated Ingress, this API call is directed to the Federation API endpoint, rather than a Kubernetes cluster API endpoint. The API for Federated Ingress is 100% compatible with the API for traditional Kubernetes Services.
+For the sake of clarity, this guide defines the following terms:
 
-Once created, the Federated Ingress automatically:
+* Node: A single virtual or physical machine in a Kubernetes cluster.
+* Cluster: A group of nodes firewalled from the internet, that are the primary compute resources managed by Kubernetes.
+* Edge router: A router that enforces the firewall policy for your cluster. This could be a gateway managed by a cloud provider or a physical piece of hardware.
+* Cluster network: A set of links, logical or physical, that facilitate communication within a cluster according to the [Kubernetes networking model](/docs/concepts/cluster-administration/networking/).
+* Service: A Kubernetes [Service](/docs/concepts/services-networking/service/) that identifies a set of pods using label selectors. Unless mentioned otherwise, Services are assumed to have virtual IPs only routable within the cluster network.
 
-* Creates matching Kubernetes Ingress objects in every cluster underlying your Cluster Federation
-* Ensures that all of these in-cluster ingress objects share the same logical global L7 (that is, HTTP(S)) load balancer and IP address
-* Monitors the health and capacity of the service shards (that is, your pods) behind this ingress in each cluster
-* Ensures that all client connections are routed to an appropriate healthy backend service endpoint at all times, even in the event of pod, cluster, availability zone or regional outages
+## What is Ingress?
 
-Note that in the case of Google Cloud, the logical L7 load balancer is not a single physical device (which would present both a single point of failure, and a single global network routing choke point), but rather a [truly global, highly available load balancing managed service](https://cloud.google.com/load-balancing/), globally reachable via a single, static IP address.
+Ingress, added in Kubernetes v1.1, exposes HTTP and HTTPS routes from outside the cluster to {{< link text="services" url="/docs/concepts/services-networking/service/" >}} within the cluster. Traffic routing is controlled by rules defined on the ingress resource.
 
-Clients inside your federated Kubernetes clusters (Pods) will be automatically routed to the cluster-local shard of the Federated Service backing the Ingress in their cluster if it exists and is healthy, or the closest healthy shard in a different cluster if it does not. Note that this involves a network trip to the HTTP(s) load balancer, which resides outside your local Kubernetes cluster but inside the same GCP region. {{% /capture %}}
-
-{{% capture prerequisites %}} This document assumes that you have a running Kubernetes Cluster Federation installation. If not, then see the [federation admin guide](/docs/tasks/federation/set-up-cluster-federation-kubefed/) to learn how to bring up a cluster federation (or have your cluster administrator do this for you). Other tutorials, for example [this one](https://github.com/kelseyhightower/kubernetes-cluster-federation) by Kelsey Hightower, are also available to help you.
-
-You must also have a basic [working knowledge of Kubernetes](/docs/setup/) in general, and [Ingress](/docs/concepts/services-networking/ingress/) in particular. {{% /capture %}}
-
-{{% capture steps %}}
-
-## Creating a federated ingress
-
-You can create a federated ingress in any of the usual ways, for example, using kubectl:
-
-```shell
-kubectl --context=federation-cluster create -f myingress.yaml
+```none
+    internet
+        |
+   [ Ingress ]
+   --|-----|--
+   [ Services ]
 ```
 
-For example ingress YAML configurations, see the [Ingress User Guide](/docs/concepts/services-networking/ingress/). The `--context=federation-cluster` flag tells kubectl to submit the request to the Federation API endpoint, with the appropriate credentials. If you have not yet configured such a context, see the [federation admin guide](/docs/admin/federation/) or one of the [administration tutorials](https://github.com/kelseyhightower/kubernetes-cluster-federation) to find out how to do so.
+An ingress can be configured to give services externally-reachable URLs, load balance traffic, terminate SSL, and offer name based virtual hosting. An [ingress controller](#ingress-controllers) is responsible for fulfilling the ingress, usually with a loadbalancer, though it may also configure your edge router or additional frontends to help handle the traffic.
 
-The Federated Ingress automatically creates and maintains matching Kubernetes ingresses in all of the clusters underlying your federation. These cluster-specific ingresses (and their associated ingress controllers) configure and manage the load balancing and health checking infrastructure that ensures that traffic is load balanced to each cluster appropriately.
+An ingress does not expose arbitrary ports or protocols. Exposing services other than HTTP and HTTPS to the internet typically uses a service of type [Service.Type=NodePort](/docs/concepts/services-networking/service/#nodeport) or [Service.Type=LoadBalancer](/docs/concepts/services-networking/service/#loadbalancer).
 
-You can verify this by checking in each of the underlying clusters. For example:
+## Prerequisites
 
-```shell
-kubectl --context=gce-asia-east1a get ingress myingress
-NAME        HOSTS     ADDRESS           PORTS     AGE
-myingress   *         130.211.5.194     80, 443   1m
+{{< feature-state for_k8s_version="v1.1" state="beta" >}}
+
+Before you start using an ingress, there are a few things you should understand. The ingress is a beta resource. You will need an ingress controller to satisfy an ingress, simply creating the resource will have no effect.
+
+GCE/Google Kubernetes Engine deploys an [ingress controller](#ingress-controllers) on the master. Review the [beta limitations](https://github.com/kubernetes/ingress-gce/blob/master/BETA_LIMITATIONS.md#glbc-beta-limitations) of this controller if you are using GCE/GKE.
+
+In environments other than GCE/Google Kubernetes Engine, you may need to [deploy an ingress controller](https://kubernetes.github.io/ingress-nginx/deploy/). There are a number of [ingress controller](#ingress-controllers) you may choose from.
+
+## Ingress controllers
+
+In order for the ingress resource to work, the cluster must have an ingress controller running. This is unlike other types of controllers, which run as part of the `kube-controller-manager` binary, and are typically started automatically with a cluster. Choose the ingress controller implementation that best fits your cluster.
+
+* Kubernetes as a project currently supports and maintains [GCE](https://git.k8s.io/ingress-gce/README.md) and [nginx](https://git.k8s.io/ingress-nginx/README.md) controllers.
+
+Additional controllers include:
+
+* [Contour](https://github.com/heptio/contour) is an [Envoy](https://www.envoyproxy.io) based ingress controller provided and supported by Heptio.
+* F5 Networks provides [support and maintenance](https://support.f5.com/csp/article/K86859508) for the [F5 BIG-IP Controller for Kubernetes](http://clouddocs.f5.com/products/connectors/k8s-bigip-ctlr/latest).
+* [HAProxy](http://www.haproxy.org/) based ingress controller [jcmoraisjr/haproxy-ingress](https://github.com/jcmoraisjr/haproxy-ingress) which is mentioned on the blog post [HAProxy Ingress Controller for Kubernetes](https://www.haproxy.com/blog/haproxy_ingress_controller_for_kubernetes/). [HAProxy Technologies](https://www.haproxy.com/) offers support and maintenance for HAProxy Enterprise and the ingress controller [jcmoraisjr/haproxy-ingress](https://github.com/jcmoraisjr/haproxy-ingress).
+* [Istio](https://istio.io/) based ingress controller [Control Ingress Traffic](https://istio.io/docs/tasks/traffic-management/ingress/).
+* [Kong](https://konghq.com/) offers [community](https://discuss.konghq.com/c/kubernetes) or [commercial](https://konghq.com/api-customer-success/) support and maintenance for the [Kong Ingress Controllerfor Kubernetes](https://konghq.com/blog/kubernetes-ingress-controller-for-kong/).
+* [NGINX, Inc.](https://www.nginx.com/) offers support and maintenance for the [NGINX Ingress Controller for Kubernetes](https://www.nginx.com/products/nginx/kubernetes-ingress-controller).
+* [Traefik](https://github.com/containous/traefik) is a fully featured ingress controller ([Let's Encrypt](https://letsencrypt.org), secrets, http2, websocket), and it also comes with commercial support by [Containous](https://containo.us/services).
+
+You may deploy [any number of ingress controllers](https://git.k8s.io/ingress-nginx/docs/user-guide/multiple-ingress.md#multiple-ingress-controllers) within a cluster. When you create an ingress, you should annotate each ingress with the appropriate [`ingress-class`](https://git.k8s.io/ingress-gce/examples/PREREQUISITES.md#ingress-class) to indicate which ingress controller should be used if more than one exists within your cluster. If you do not define a class, your cloud provider may use a default ingress provider.
+
+### Before you begin
+
+Ideally, all ingress controllers should fulfill this specification, but the various ingress controllers operate slightly differently.
+
+{{< note >}} Make sure you review your ingress controller's documentation to understand the caveats of choosing it. {{< /note >}}
+
+## The Ingress Resource
+
+A minimal ingress resource example:
+
+```yaml
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: test-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  rules:
+  - http:
+      paths:
+      - path: /testpath
+        backend:
+          serviceName: test
+          servicePort: 80
 ```
 
-The above assumes that you have a context named 'gce-asia-east1a' configured in your client for your cluster in that zone. The name and namespace of the underlying ingress automatically matches those of the Federated Ingress that you created above (and if you happen to have had ingresses of the same name and namespace already existing in any of those clusters, they will be automatically adopted by the Federation and updated to conform with the specification of your Federated Ingress. Either way, the end result will be the same).
+As with all other Kubernetes resources, an ingress needs `apiVersion`, `kind`, and `metadata` fields.  
+For general information about working with config files, see [deploying applications](/docs/tasks/run-application/run-stateless-application-deployment/), [configuring containers](/docs/tasks/configure-pod-container/configure-pod-configmap/), [managing resources](/docs/concepts/cluster-administration/manage-deployment/). Ingress frequently uses annotations to configure some options depending on the ingress controller, an example of which is the [rewrite-target annotation](https://github.com/kubernetes/ingress-nginx/blob/master/docs/examples/rewrite/README.md). Different [ingress controller](#ingress-controllers) support different annotations. Review the documentation for your choice of ingress controller to learn which annotations are supported.
 
-The status of your Federated Ingress automatically reflects the real-time status of the underlying Kubernetes ingresses. For example:
+The ingress [spec](https://git.k8s.io/community/contributors/devel/api-conventions.md#spec-and-status) has all the information needed to configure a loadbalancer or proxy server. Most importantly, it contains a list of rules matched against all incoming requests. Ingress resource only supports rules for directing HTTP traffic.
+
+### Ingress rules
+
+Each http rule contains the following information:
+
+* An optional host. In this example, no host is specified, so the rule applies to all inbound HTTP traffic through the IP address is specified. If a host is provided (for example, foo.bar.com), the rules apply to that host.
+* a list of paths (for example, /testpath), each of which has an associated backend defined with a `serviceName` and `servicePort`. Both the host and path must match the content of an incoming request before the loadbalancer will direct traffic to the referenced service.
+* A backend is a combination of service and port names as described in the [services doc](/docs/concepts/services-networking/service/). HTTP (and HTTPS) requests to the ingress matching the host and path of the rule will be sent to the listed backend.
+
+A default backend is often configured in an ingress controller that will service any requests that do not match a path in the spec.
+
+### Default Backend
+
+An ingress with no rules sends all traffic to a single default backend. The default backend is typically a configuration option of the [ingress controller](#ingress-controllers) and is not specified in your ingress resources.
+
+If none of the hosts or paths match the HTTP request in the ingress objects, the traffic is routed to your default backend.
+
+## Types of Ingress
+
+### Single Service Ingress
+
+There are existing Kubernetes concepts that allow you to expose a single Service (see [alternatives](#alternatives)). You can also do this with an ingress by specifying a *default backend* with no rules.
+
+{{< codenew file="service/networking/ingress.yaml" >}}
+
+If you create it using `kubectl create -f` you should see:
 
 ```shell
-kubectl --context=federation-cluster describe ingress myingress
+kubectl get ingress test-ingress
+```
 
-Name:           myingress
-Namespace:      default
-Address:        130.211.5.194
-TLS:
-  tls-secret terminates
+```shell
+NAME           HOSTS     ADDRESS           PORTS     AGE
+test-ingress   *         107.178.254.228   80        59s
+```
+
+Where `107.178.254.228` is the IP allocated by the ingress controller to satisfy this ingress.
+
+{{< note >}} Ingress controllers and load balancers may take a minute or two to allocate an IP address. Until that time you will often see the address listed as `<pending>`. {{< /note >}}
+
+### Simple fanout
+
+A fanout configuration routes traffic from a single IP address to more than one service, based on the HTTP URI being requested. An ingress allows you to keep the number of loadbalancers down to a minimum. For example, a setup like:
+
+```shell
+foo.bar.com -> 178.91.123.132 -> / foo    service1:4200
+                                 / bar    service2:8080
+```
+
+would require an ingress such as:
+
+```yaml
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: simple-fanout-example
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  rules:
+  - host: foo.bar.com
+    http:
+      paths:
+      - path: /foo
+        backend:
+          serviceName: service1
+          servicePort: 4200
+      - path: /bar
+        backend:
+          serviceName: service2
+          servicePort: 8080
+```
+
+When you create the ingress with `kubectl create -f`:
+
+```shell
+kubectl describe ingress simple-fanout-example
+```
+
+```shell
+Name:             simple-fanout-example
+Namespace:        default
+Address:          178.91.123.132
+Default backend:  default-http-backend:80 (10.8.2.3:8080)
 Rules:
-  Host  Path    Backends
-  ----  ----    --------
-  * *   echoheaders-https:80 (10.152.1.3:8080,10.152.2.4:8080)
+  Host         Path  Backends
+  ----         ----  --------
+  foo.bar.com
+               /foo   service1:4200 (10.8.0.90:4200)
+               /bar   service2:8080 (10.8.0.91:8080)
 Annotations:
-  https-target-proxy:       k8s-tps-default-myingress--ff1107f83ed600c0
-  target-proxy:         k8s-tp-default-myingress--ff1107f83ed600c0
-  url-map:          k8s-um-default-myingress--ff1107f83ed600c0
-  backends:         {"k8s-be-30301--ff1107f83ed600c0":"Unknown"}
-  forwarding-rule:      k8s-fw-default-myingress--ff1107f83ed600c0
-  https-forwarding-rule:    k8s-fws-default-myingress--ff1107f83ed600c0
+  nginx.ingress.kubernetes.io/rewrite-target:  /
 Events:
-  FirstSeen LastSeen    Count   From                SubobjectPath   Type        Reason  Message
-  --------- --------    -----   ----                -------------   --------    ------  -------
-  3m        3m      1   {loadbalancer-controller }          Normal      ADD default/myingress
-  2m        2m      1   {loadbalancer-controller }          Normal      CREATE  ip: 130.211.5.194
+  Type     Reason  Age                From                     Message
+  ----     ------  ----               ----                     -------
+  Normal   ADD     22s                loadbalancer-controller  default/test
 ```
 
-Note that:
+The ingress controller will provision an implementation specific loadbalancer that satisfies the ingress, as long as the services (`s1`, `s2`) exist. When it has done so, you will see the address of the loadbalancer at the Address field.
 
-* The address of your Federated Ingress corresponds with the address of all of the underlying Kubernetes ingresses (once these have been allocated - this may take up to a few minutes).
-* You have not yet provisioned any backend Pods to receive the network traffic directed to this ingress (that is, 'Service Endpoints' behind the service backing the Ingress), so the Federated Ingress does not yet consider these to be healthy shards and will not direct traffic to any of these clusters.
-* The federation control system automatically reconfigures the load balancer controllers in all of the clusters in your federation to make them consistent, and allows them to share global load balancers. But this reconfiguration can only complete successfully if there are no pre-existing Ingresses in those clusters (this is a safety feature to prevent accidental breakage of existing ingresses). So, to ensure that your federated ingresses function correctly, either start with new, empty clusters, or make sure that you delete (and recreate if necessary) all pre-existing Ingresses in the clusters comprising your federation.
+{{< note >}} Depending on the [ingress controller](#ingress-controllers) you are using, you may need to create a default-http-backend [Service](/docs/concepts/services-networking/service/). {{< /note >}}
 
-## Adding backend services and pods
+### Name based virtual hosting
 
-To render the underlying ingress shards healthy, you need to add backend Pods behind the service upon which the Ingress is based. There are several ways to achieve this, but the easiest is to create a Federated Service and Federated ReplicaSet. To create appropriately labelled pods and services in the 13 underlying clusters of your federation:
+Name-based virtual hosts support routing HTTP traffic to multiple host names at the same IP address.
+
+```none
+foo.bar.com --|                 |-> foo.bar.com s1:80
+              | 178.91.123.132  |
+bar.foo.com --|                 |-> bar.foo.com s2:80
+```
+
+The following ingress tells the backing loadbalancer to route requests based on the [Host header](https://tools.ietf.org/html/rfc7230#section-5.4).
+
+```yaml
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: name-virtual-host-ingress
+spec:
+  rules:
+  - host: foo.bar.com
+    http:
+      paths:
+      - backend:
+          serviceName: service1
+          servicePort: 80
+  - host: bar.foo.com
+    http:
+      paths:
+      - backend:
+          serviceName: service2
+          servicePort: 80
+```
+
+If you create an ingress resource without any hosts defined in the rules, then any web traffic to the IP address of your ingress controller can be matched without a name based virtual host being required. For example, the following ingress resource will route traffic requested for `first.bar.com` to `service1`, `second.bar.com` to `service2`, and any traffic to the IP address without a hostname defined in request (that is, without a request header being presented) to `service3`.
+
+```yaml
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: name-virtual-host-ingress
+spec:
+  rules:
+  - host: first.bar.com
+    http:
+      paths:
+      - backend:
+          serviceName: service1
+          servicePort: 80
+  - host: second.foo.com
+    http:
+      paths:
+      - backend:
+          serviceName: service2
+          servicePort: 80
+  - http:
+      paths:
+      - backend:
+          serviceName: service3
+          servicePort: 80
+```
+
+### TLS
+
+You can secure an ingress by specifying a [secret](/docs/concepts/configuration/secret) that contains a TLS private key and certificate. Currently the ingress only supports a single TLS port, 443, and assumes TLS termination. If the TLS configuration section in an ingress specifies different hosts, they will be multiplexed on the same port according to the hostname specified through the SNI TLS extension (provided the ingress controller supports SNI). The TLS secret must contain keys named `tls.crt` and `tls.key` that contain the certificate and private key to use for TLS, e.g.:
+
+```yaml
+apiVersion: v1
+data:
+  tls.crt: base64 encoded cert
+  tls.key: base64 encoded key
+kind: Secret
+metadata:
+  name: testsecret-tls
+  namespace: default
+type: Opaque
+```
+
+Referencing this secret in an ingress will tell the ingress controller to secure the channel from the client to the loadbalancer using TLS. You need to make sure the TLS secret you created came from a certificate that contains a CN for `sslexample.foo.com`.
+
+```yaml
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: tls-example-ingress
+spec:
+  tls:
+  - hosts:
+    - sslexample.foo.com
+    secretName: testsecret-tls
+  rules:
+    - host: sslexample.foo.com
+      http:
+        paths:
+        - path: /
+          backend:
+            serviceName: service1
+            servicePort: 80
+```
+
+{{< note >}} There is a gap between TLS features supported by various ingress controllers. Please refer to documentation on [nginx](https://git.k8s.io/ingress-nginx/README.md#https), [GCE](https://git.k8s.io/ingress-gce/README.md#frontend-https), or any other platform specific ingress controller to understand how TLS works in your environment. {{< /note >}}
+
+### Loadbalancing
+
+An ingress controller is bootstrapped with some load balancing policy settings that it applies to all ingress, such as the load balancing algorithm, backend weight scheme, and others. More advanced load balancing concepts (e.g. persistent sessions, dynamic weights) are not yet exposed through the ingress. You can still get these features through the [service loadbalancer](https://github.com/kubernetes/ingress-nginx).
+
+It's also worth noting that even though health checks are not exposed directly through the ingress, there exist parallel concepts in Kubernetes such as [readiness probes](/docs/tasks/configure-pod-container/configure-liveness-readiness-probes/) which allow you to achieve the same end result. Please review the controller specific docs to see how they handle health checks ( [nginx](https://git.k8s.io/ingress-nginx/README.md), [GCE](https://git.k8s.io/ingress-gce/README.md#health-checks)).
+
+## Updating an Ingress
+
+To update an existing ingress to add a new Host, you can update it by editing the resource:
 
 ```shell
-kubectl --context=federation-cluster create -f services/nginx.yaml
+kubectl describe ingress test
 ```
 
 ```shell
-kubectl --context=federation-cluster create -f myreplicaset.yaml
+Name:             test
+Namespace:        default
+Address:          178.91.123.132
+Default backend:  default-http-backend:80 (10.8.2.3:8080)
+Rules:
+  Host         Path  Backends
+  ----         ----  --------
+  foo.bar.com
+               /foo   s1:80 (10.8.0.90:80)
+Annotations:
+  nginx.ingress.kubernetes.io/rewrite-target:  /
+Events:
+  Type     Reason  Age                From                     Message
+  ----     ------  ----               ----                     -------
+  Normal   ADD     35s                loadbalancer-controller  default/test
 ```
-
-Note that in order for your federated ingress to work correctly on Google Cloud, the node ports of all of the underlying cluster-local services need to be identical. If you're using a federated service this is easy to do. Simply pick a node port that is not already being used in any of your clusters, and add that to the spec of your federated service. If you do not specify a node port for your federated service, each cluster will choose its own node port for its cluster-local shard of the service, and these will probably end up being different, which is not what you want.
-
-You can verify this by checking in each of the underlying clusters. For example:
 
 ```shell
-kubectl --context=gce-asia-east1a get services nginx
-NAME      TYPE        CLUSTER-IP     EXTERNAL-IP      PORT(S)   AGE
-nginx     ClusterIP   10.63.250.98   104.199.136.89   80/TCP    9m
+kubectl edit ingress test
 ```
 
-## Hybrid cloud capabilities
+This should pop up an editor with the existing yaml, modify it to include the new Host:
 
-Federations of Kubernetes Clusters can include clusters running in different cloud providers (for example, Google Cloud, AWS), and on-premises (for example, on OpenStack). However, in Kubernetes v1.4, Federated Ingress is only supported across Google Cloud clusters.
+```yaml
+spec:
+  rules:
+  - host: foo.bar.com
+    http:
+      paths:
+      - backend:
+          serviceName: s1
+          servicePort: 80
+        path: /foo
+  - host: bar.baz.com
+    http:
+      paths:
+      - backend:
+          serviceName: s2
+          servicePort: 80
+        path: /foo
+..
+```
 
-## Discovering a federated ingress
+Saving the yaml will update the resource in the API server, which should tell the ingress controller to reconfigure the loadbalancer.
 
-Ingress objects (in both plain Kubernetes clusters, and in federations of clusters) expose one or more IP addresses (via the Status.Loadbalancer.Ingress field) that remains static for the lifetime of the Ingress object (in future, automatically managed DNS names might also be added). All clients (whether internal to your cluster, or on the external network or internet) should connect to one of these IP or DNS addresses. All client requests are automatically routed, via the shortest network path, to a healthy pod in the closest cluster to the origin of the request. So for example, HTTP(S) requests from internet users in Europe will be routed directly to the closest cluster in Europe that has available capacity. If there are no such clusters in Europe, the request will be routed to the next closest cluster (typically in the U.S.).
+```shell
+kubectl describe ingress test
+```
 
-## Handling failures of backend pods and whole clusters
+```shell
+Name:             test
+Namespace:        default
+Address:          178.91.123.132
+Default backend:  default-http-backend:80 (10.8.2.3:8080)
+Rules:
+  Host         Path  Backends
+  ----         ----  --------
+  foo.bar.com
+               /foo   s1:80 (10.8.0.90:80)
+  bar.baz.com
+               /foo   s2:80 (10.8.0.91:80)
+Annotations:
+  nginx.ingress.kubernetes.io/rewrite-target:  /
+Events:
+  Type     Reason  Age                From                     Message
+  ----     ------  ----               ----                     -------
+  Normal   ADD     45s                loadbalancer-controller  default/test
+```
 
-Ingresses are backed by Services, which are typically (but not always) backed by one or more ReplicaSets. For Federated Ingresses, it is common practise to use the federated variants of Services and ReplicaSets for this purpose.
+You can achieve the same by invoking `kubectl replace -f` on a modified ingress yaml file.
 
-In particular, Federated ReplicaSets ensure that the desired number of pods are kept running in each cluster, even in the event of node failures. In the event of entire cluster or availability zone failures, Federated ReplicaSets automatically place additional replicas in the other available clusters in the federation to accommodate the traffic which was previously being served by the now unavailable cluster. While the Federated ReplicaSet ensures that sufficient replicas are kept running, the Federated Ingress ensures that user traffic is automatically redirected away from the failed cluster to other available clusters.
+## Failing across availability zones
 
-## Troubleshooting
+Techniques for spreading traffic across failure domains differs between cloud providers. Please check the documentation of the relevant [ingress controller](#ingress-controllers) for details. You can also refer to the [federation documentation](/docs/concepts/cluster-administration/federation/) for details on deploying ingress in a federated cluster.
 
-#### I cannot connect to my cluster federation API.
+## Future Work
 
-Check that your:
+Track [SIG Network](https://github.com/kubernetes/community/tree/master/sig-network) for more details on the evolution of the ingress and related resources. You may also track the [ingress repository](https://github.com/kubernetes/ingress/tree/master) for more details on the evolution of various ingress controllers.
 
-1. Client (typically `kubectl`) is correctly configured (including API endpoints and login credentials).
-2. Cluster Federation API server is running and network-reachable.
+## Alternatives
 
-See the [federation admin guide](/docs/admin/federation/) to learn how to bring up a cluster federation correctly (or have your cluster administrator do this for you), and how to correctly configure your client.
+You can expose a Service in multiple ways that don't directly involve the ingress resource:
 
-#### I can create a Federated Ingress/service/replicaset successfully against the cluster federation API, but no matching ingresses/services/replicasets are created in my underlying clusters.
+* Use [Service.Type=LoadBalancer](/docs/concepts/services-networking/service/#loadbalancer)
+* Use [Service.Type=NodePort](/docs/concepts/services-networking/service/#nodeport)
+* Use a [Port Proxy](https://git.k8s.io/contrib/for-demos/proxy-to-service)
 
-Check that:
+{{% /capture %}}
 
-1. Your clusters are correctly registered in the Cluster Federation API. (`kubectl describe clusters`)
-2. Your clusters are all 'Active'. This means that the cluster Federation system was able to connect and authenticate against the clusters' endpoints. If not, consult the event logs of the federation-controller-manager pod to ascertain what the failure might be. (`kubectl --namespace=federation logs $(kubectl get pods --namespace=federation -l module=federation-controller-manager -o name`)
-3. That the login credentials provided to the Cluster Federation API for the clusters have the correct authorization and quota to create ingresses/services/replicasets in the relevant namespace in the clusters. Again you should see associated error messages providing more detail in the above event log file if this is not the case.
-4. Whether any other error is preventing the service creation operation from succeeding (look for `ingress-controller`, `service-controller` or `replicaset-controller`, errors in the output of `kubectl logs federation-controller-manager --namespace federation`).
+{{% capture whatsnext %}}
 
-#### I can create a federated ingress successfully, but request load is not correctly distributed across the underlying clusters.
-
-Check that:
-
-1. The services underlying your federated ingress in each cluster have identical node ports. See [above](#creating_a_federated_ingress) for further explanation.
-2. The load balancer controllers in each of your clusters are of the correct type ("GLBC") and have been correctly reconfigured by the federation control plane to share a global GCE load balancer (this should happen automatically). If they are of the correct type, and have been correctly reconfigured, the UID data item in the GLBC configmap in each cluster will be identical across all clusters. See [the GLBC docs](https://github.com/kubernetes/ingress/blob/7dcb4ae17d5def23d3e9c878f3146ac6df61b09d/controllers/gce/README.md) for further details. If this is not the case, check the logs of your federation controller manager to determine why this automated reconfiguration might be failing.
-3. No ingresses have been manually created in any of your clusters before the above reconfiguration of the load balancer controller completed successfully. Ingresses created before the reconfiguration of your GLBC will interfere with the behavior of your federated ingresses created after the reconfiguration (see [the GLBC docs](https://github.com/kubernetes/ingress/blob/7dcb4ae17d5def23d3e9c878f3146ac6df61b09d/controllers/gce/README.md) for further information). To remedy this, delete any ingresses created before the cluster joined the federation (and had its GLBC reconfigured), and recreate them if necessary. {{% /capture %}}
-
-{{% capture whatsnext %}} * If you need assistance, use one of the [support channels](/docs/tasks/debug-application-cluster/troubleshooting/) to seek assistance. * For details about use cases that motivated this work, see [Federation proposal](https://git.k8s.io/community/contributors/design-proposals/multicluster/federation.md). {{% /capture %}}
+{{% /capture %}}
