@@ -5,155 +5,99 @@ layout: docsportal
 css: /css/style_user_journeys.css
 js: https://use.fontawesome.com/4bcc658a89.js, https://cdnjs.cloudflare.com/ajax/libs/prefixfree/1.0.7/prefixfree.min.js
 title: Intermediate
-track: "USERS › APPLICATION DEVELOPER › INTERMEDIATE"
+track: "USERS > CLUSTER OPERATOR > INTERMEDIATE"
 content_template: templates/user-journey-content
 ---
 
-
 {{% capture overview %}}
 
-{{< note >}} This page assumes that you've experimented with Kubernetes before. At this point, you should have basic experience interacting with a Kubernetes cluster (locally with Minikube, or elsewhere), and using API objects like Deployments to run your applications.  
-  
-If not, you should review the {{< link text="Beginner App Developer" url="/docs/user-journeys/users/application-developer/foundational/" >}} topics first. {{< /note >}} After checking out the current page and its linked sections, you should have a better understanding of the following:
-
-* Additional Kubernetes workload patterns, beyond Deployments
-* What it takes to make a Kubernetes application production-ready
-* Community tools that can improve your development workflow
+If you are a cluster operator looking to expand your grasp of Kubernetes, this page and its linked topics extend the information provided on the [foundational cluster operator page](/docs/user-journeys/users/cluster-operator/foundational). From this page you can get information on key Kubernetes tasks needed to manage a complete production cluster.
 
 {{% /capture %}}
 
 {{% capture body %}}
 
-## Learn additional workload patterns
+## Work with ingress, networking, storage, and workloads
 
-As your Kubernetes use cases become more complex, you may find it helpful to familiarize yourself with more of the toolkit that Kubernetes provides. {{< link text="Basic workload" url="/docs/user-journeys/users/application-developer/foundational/#section-2" >}} objects like {{< glossary_tooltip text="Deployments" term_id="deployment" >}} make it straightforward to run, update, and scale applications, but they are not ideal for every scenario.
+Introductions to Kubernetes typically discuss simple stateless applications. As you move into more complex development, testing, and production environments, you need to consider more complex cases:
 
-The following API objects provide functionality for additional workload types, whether they are *persistent* or *terminating*.
+Communication: Ingress and Networking
 
-#### Persistent workloads
+* [Ingress](/docs/concepts/services-networking/ingress/)
 
-Like Deployments, these API objects run indefinitely on a cluster until they are manually terminated. They are best for long-running applications.
+Storage: Volumes and PersistentVolumes
 
-* **{{< glossary_tooltip text="StatefulSets" term_id="statefulset" >}}** - Like Deployments, StatefulSets allow you to specify that a certain number of replicas should be running for your application.
-    
-    {{< note >}} It's misleading to say that Deployments can't handle stateful workloads. Using {{< glossary_tooltip text="PersistentVolumes" term_id="persistent-volume" >}}, you can persist data beyond the lifecycle of any individual Pod in your Deployment. {{< /note >}}
-    
-    However, StatefulSets can provide stronger guarantees about "recovery" behavior than Deployments. StatefulSets maintain a sticky, stable identity for their Pods. The following table provides some concrete examples of what this might look like:
-    
-    |                                     | Deployment                                             | StatefulSet                                                                                         |
-    | ----------------------------------- | ------------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
-    | **Example Pod name**                | `example-b1c4`                                         | `example-0`                                                                                         |
-    | **When a Pod dies**                 | Reschedule on *any* node, with new name `example-a51z` | Reschedule on same node, as `example-0`                                                             |
-    | **When a node becomes unreachable** | Pod(s) are scheduled onto new node, with new names     | Pod(s) are marked as "Unknown", and aren't rescheduled unless the Node object is forcefully deleted |
-    
-    In practice, this means that StatefulSets are best suited for scenarios where replicas (Pods) need to coordinate their workloads in a strongly consistent manner. Guaranteeing an identity for each Pod helps avoid {{< link text="split-brain" url="https://en.wikipedia.org/wiki/Split-brain_(computing)" >}} side effects in the case when a node becomes unreachable ({{< link text="network partition" url="https://en.wikipedia.org/wiki/Network_partition" >}}). This makes StatefulSets a great fit for distributed datastores like Cassandra or Elasticsearch.
+* [Volumes](/docs/concepts/storage/volumes/)
+* [Persistent Volumes](/docs/concepts/storage/persistent-volumes/)
 
-* **{{< glossary_tooltip text="DaemonSets" term_id="daemonset" >}}** - DaemonSets run continuously on every node in your cluster, even as nodes are added or swapped in. This guarantee is particularly useful for setting up global behavior across your cluster, such as:
-    
-    * Logging and monitoring, from applications like `fluentd`
-    * Network proxy or {{< link text="service mesh" url="https://www.linux.com/news/whats-service-mesh-and-why-do-i-need-one" >}}
+Workloads
 
-#### Terminating workloads
+* [DaemonSets](/docs/concepts/workloads/controllers/daemonset/)
+* [Stateful Sets](/docs/concepts/workloads/controllers/statefulset/)
+* [Jobs](/docs/concepts/workloads/controllers/jobs-run-to-completion/)
+* [CronJobs](/docs/concepts/workloads/controllers/cron-jobs/)
 
-In contrast to Deployments, these API objects are finite. They stop once the specified number of Pods have completed successfully.
+Pods
 
-* **{{< glossary_tooltip text="Jobs" term_id="job" >}}** - You can use these for one-off tasks like running a script or setting up a work queue. These tasks can be executed sequentially or in parallel. These tasks should be relatively independent, as Jobs do not support closely communicating parallel processes. {{< link text="Read more about Job patterns" url="/docs/concepts/workloads/controllers/jobs-run-to-completion/#job-patterns" >}}.
+* [Pod Lifecycle](/docs/concepts/workloads/pods/pod-lifecycle/) 
+  * [Init Containers](/docs/concepts/workloads/pods/init-containers/)
+  * [Pod Presets](/docs/concepts/workloads/pods/podpreset/)
+  * [Container Lifecycle Hooks](/docs/concepts/containers/container-lifecycle-hooks/)
 
-* **{{< glossary_tooltip text="CronJobs" term_id="cronjob" >}}** - These are similar to Jobs, but allow you to schedule their execution for a specific time or for periodic recurrence. You might use CronJobs to send reminder emails or to run backup jobs. They are set up with a similar syntax as *crontab*.
+And how Pods work with scheduling, priority, disruptions:
 
-#### Other resources
+* [Taints and Tolerations](/docs/concepts/configuration/taint-and-toleration/)
+* [Pods and Priority](/docs/concepts/configuration/pod-priority-preemption/)
+* [Disruptions](/docs/concepts/workloads/pods/disruptions/)
+* [Assigning Pods to Nodes](/docs/concepts/configuration/assign-pod-node/)
+* [Managing Compute Resources for Containers](/docs/concepts/configuration/manage-compute-resources-container/)
+* [Configuration Best Practices](/docs/concepts/configuration/overview/)
 
-For more info, you can check out {{< link text="a list of additional Kubernetes resource types" url="/docs/reference/kubectl/overview/#resource-types" >}} as well as the {{< link text="API reference docs" url="{{ reference_docs_url }}" >}}.
+## Implement security best practices
 
-There may be additional features not mentioned here that you may find useful, which are covered in the {{< link text="full Kubernetes documentation" url="/docs/home/?path=browse" >}}.
+Securing your cluster includes work beyond the scope of Kubernetes itself.
 
-## Deploy a production-ready workload
+In Kubernetes, you configure access control:
 
-The beginner tutorials on this site, such as the {{< link text="Guestbook app" url="/docs/tutorials/stateless-application/guestbook/" >}}, are geared towards getting workloads up and running on your cluster. This prototyping is great for building your intuition around Kubernetes! However, in order to reliably and securely promote your workloads to production, you need to follow some additional best practices.
+* [Controlling Access to the Kubernetes API](/docs/reference/access-authn-authz/controlling-access/)
+* [Authenticating](/docs/reference/access-authn-authz/authentication/)
+* [Using Admission Controllers](/docs/reference/access-authn-authz/admission-controllers/)
 
-#### Declarative configuration
+You also configure authorization. That is, you determine not just how users and services authenticate to the API server, or whether they have access, but also what resources they have access to. Role-based access control (RBAC) is the recommended mechanism for controlling authorization to Kubernetes resources. Other authorization modes are available for more specific use cases.
 
-You are likely interacting with your Kubernetes cluster via {{< glossary_tooltip text="kubectl" term_id="kubectl" >}}. kubectl can be used to debug the current state of your cluster (such as checking the number of nodes), or to modify live Kubernetes objects (such as updating a workload's replica count with `kubectl scale`).
+* [Authorization Overview](/docs/reference/access-authn-authz/authorization/)
+* [Using RBAC Authorization](/docs/reference/access-authn-authz/rbac/)
 
-When using kubectl to update your Kubernetes objects, it's important to be aware that different commands correspond to different approaches:
+You should create Secrets to hold sensitive data such as passwords, tokens, or keys. Be aware, however, that there are limitations to the protections that a Secret can provide. See [the Risks section of the Secrets documentation](/docs/concepts/configuration/secret/#risks).
 
-* {{< link text="Purely imperative" url="/docs/tutorials/object-management-kubectl/imperative-object-management-command/" >}}
-* {{< link text="Imperative with local configuration files" url="/docs/tutorials/object-management-kubectl/imperative-object-management-configuration/" >}} (typically YAML)
-* {{< link text="Declarative with local configuration files" url="/docs/tutorials/object-management-kubectl/declarative-object-management-configuration/" >}} (typically YAML)
+<!-- TODO: Other security content? -->
 
-There are pros and cons to each approach, though the declarative approach (such as `kubectl apply -f`) may be most helpful in production. With this approach, you rely on local YAML files as the source of truth about your desired state. This enables you to version control your configuration, which is helpful for code reviews and audit tracking.
+## Implement custom logging and monitoring
 
-For additional configuration best practices, familiarize yourself with {{< link text="this guide" url="/docs/concepts/configuration/overview/" >}}.
+Monitoring the health and state of your cluster is important. Collecting metrics, logging, and providing access to that information are common needs. Kubernetes provides some basic logging structure, and you may want to use additional tools to help aggregate and analyze log data.
 
-#### Security
+Start with the [basics on Kubernetes logging](/docs/concepts/cluster-administration/logging/) to understand how containers do logging and common patterns. Cluster operators often want to add something to gather and aggregate those logs. See the following topics:
 
-You may be familiar with the *principle of least privilege*\---if you are too generous with permissions when writing or using software, the negative effects of a compromise can escalate out of control. Would you be cautious handing out `sudo` privileges to software on your OS? If so, you should be just as careful when granting your workload permissions to the {{< glossary_tooltip text="Kubernetes API" term_id="kubernetes-api" >}} server! The API server is the gateway for your cluster's source of truth; it provides endpoints to read or modify cluster state.
+* [Logging Using Elasticsearch and Kibana](/docs/tasks/debug-application-cluster/logging-elasticsearch-kibana/)
+* [Logging Using Stackdriver](/docs/tasks/debug-application-cluster/logging-stackdriver/)
 
-You (or your {{< glossary_tooltip text="cluster operator" term_id="cluster-operator" >}}) can lock down API access with the following:
+Like log aggregation, many clusters utilize additional software to help capture metrics and display them. There is an overview of tools at [Tools for Monitoring Compute, Storage, and Network Resources](/docs/tasks/debug-application-cluster/resource-usage-monitoring/). Kubernetes also supports a [core metrics pipeline](/docs/tasks/debug-application-cluster/core-metrics-pipeline/) which can be used by Horizontal Pod Autoscaler with custom metrics.
 
-* **{{< glossary_tooltip text="ServiceAccounts" term_id="service-account" >}}** - An "identity" that your Pods can be tied to
-* **{{< glossary_tooltip text="RBAC" term_id="rbac" >}}** - One way of granting your ServiceAccount explicit permissions
+[Prometheus](https://prometheus.io/), which is another CNCF project, is a common choice to support capture and temporary collection of metrics. There are several options for installing Prometheus, including using the [stable/prometheus](https://github.com/kubernetes/charts/tree/master/stable/prometheus) [helm](https://helm.sh/) chart, and CoreOS provides a [prometheus operator](https://github.com/coreos/prometheus-operator) and [kube-prometheus](https://github.com/coreos/prometheus-operator/tree/master/contrib/kube-prometheus), which adds on Grafana dashboards and common configurations.
 
-For even more comprehensive reading about security best practices, consider checking out the following topics:
+A common configuration on [Minikube](https://github.com/kubernetes/minikube) and some Kubernetes clusters uses [Heapster](https://github.com/kubernetes/heapster) [along with InfluxDB and Grafana](https://github.com/kubernetes/heapster/blob/master/docs/influxdb.md). There is a [walkthrough of how to install this configuration in your cluster](https://blog.kublr.com/how-to-utilize-the-heapster-influxdb-grafana-stack-in-kubernetes-for-monitoring-pods-4a553f4d36c9). As of Kubernetes 1.11, Heapster is deprecated, as per [sig-instrumentation](https://github.com/kubernetes/community/tree/master/sig-instrumentation). See [Prometheus vs. Heapster vs. Kubernetes Metrics APIs](https://brancz.com/2018/01/05/prometheus-vs-heapster-vs-kubernetes-metrics-apis/) for more information alternatives.
 
-* {{< link text="Authentication" url="/docs/reference/access-authn-authz/authentication/" >}} (Is the user who they say they are?)
-* {{< link text="Authorization" url="/docs/admin/authorization/" >}} (Does the user actually have permissions to do what they're asking?)
+Hosted data analytics services such as [Datadog](https://docs.datadoghq.com/integrations/kubernetes/) also offer Kubernetes integration.
 
-#### Resource isolation and management
+## Additional resources
 
-If your workloads are operating in a *multi-tenant* environment with multiple teams or projects, your container(s) are not necessarily running alone on their node(s). They are sharing node resources with other containers which you do not own.
+Cluster Administration:
 
-Even if your cluster operator is managing the cluster on your behalf, it is helpful to be aware of the following:
+* [Troubleshoot Clusters](/docs/tasks/debug-application-cluster/debug-cluster/)
+* [Debug Pods and Replication Controllers](/docs/tasks/debug-application-cluster/debug-pod-replication-controller/)
+* [Debug Init Containers](/docs/tasks/debug-application-cluster/debug-init-containers/)
+* [Debug Stateful Sets](/docs/tasks/debug-application-cluster/debug-stateful-set/)
+* [Debug Applications](/docs/tasks/debug-application-cluster/debug-application/)
+* [Using explorer to investigate your cluster](https://github.com/kubernetes/examples/blob/master/staging/explorer/README.md)
 
-* **{{< glossary_tooltip text="Namespaces" term_id="namespace" >}}**, used for isolation
-* **{{< link text="Resource quotas" url="/docs/concepts/policy/resource-quotas/" >}}**, which affect what your team's workloads can use
-* **{{< link text="Memory" url="/docs/tasks/configure-pod-container/assign-memory-resource/" >}} and {{< link text="CPU" url="/docs/tasks/configure-pod-container/assign-cpu-resource/" >}} requests**, for a given Pod or container
-* **{{< link text="Monitoring" url="/docs/tasks/debug-application-cluster/resource-usage-monitoring/" >}}**, both on the cluster level and the app level
-
-This list may not be completely comprehensive, but many teams have existing processes that take care of all this. If this is not the case, you'll find the Kubernetes documentation fairly rich in detail.
-
-## Improve your dev workflow with tooling
-
-As an app developer, you'll likely encounter the following tools in your workflow.
-
-#### kubectl
-
-`kubectl` is a command-line tool that allows you to easily read or modify your Kubernetes cluster. It provides convenient, short commands for common operations like scaling app instances and getting node info. How does kubectl do this? It's basically just a user-friendly wrapper for making API requests. It's written using {{< link text="client-go" url="https://github.com/kubernetes/client-go/#client-go" >}}, the Go library for the Kubernetes API.
-
-To learn about the most commonly used kubectl commands, check out the {{< link text="kubectl cheatsheet" url="/docs/reference/kubectl/cheatsheet/" >}}. It explains topics such as the following:
-
-* {{< link text="kubeconfig files" url="/docs/tasks/access-application-cluster/configure-access-multiple-clusters/" >}} - Your kubeconfig file tells kubectl what cluster to talk to, and can reference multiple clusters (such as dev and prod).
-* {{< link text="The various output formats available" url="/docs/reference/kubectl/cheatsheet/#formatting-output" >}} - This is useful to know when you are using `kubectl get` to list information about certain API objects.
-
-* {{< link text="The JSONPath output format" url="/docs/reference/kubectl/jsonpath/" >}} - This is related to the output formats above. JSONPath is especially useful for parsing specific subfields out of `kubectl get` output (such as the URL of a {{< glossary_tooltip text="Service" term_id="service" >}}).
-
-* {{< link text="`kubectl run` vs `kubectl apply`" url="/docs/reference/kubectl/conventions/" >}} - This ties into the [declarative configuration](#declarative-configuration) discussion in the previous section.
-
-For the full list of kubectl commands and their options, check out {{< link text="the reference guide" url="/docs/reference/generated/kubectl/kubectl-commands" >}}.
-
-#### Helm
-
-To leverage pre-packaged configurations from the community, you can use **{{< glossary_tooltip text="Helm charts" term_id="helm-chart" >}}**.
-
-Helm charts package up YAML configurations for specific apps like Jenkins and Postgres. You can then install and run these apps on your cluster with minimal extra configuration. This approach makes the most sense for "off-the-shelf" components which do not require much custom implementation logic.
-
-For writing your own Kubernetes app configurations, there is a {{< link text="thriving ecosystem of tools" url="https://docs.google.com/a/heptio.com/spreadsheets/d/1FCgqz1Ci7_VCz_wdh8vBitZ3giBtac_H8SBw4uxnrsE/edit?usp=drive_web" >}} that you may find useful.
-
-## Explore additional resources
-
-#### References
-
-Now that you're fairly familiar with Kubernetes, you may find it useful to browse the following reference pages. Doing so provides a high level view of what other features may exist:
-
-* {{< link text="Commonly used `kubectl` commands" url="/docs/reference/kubectl/cheatsheet/" >}}
-* {{< link text="Kubernetes API reference" url="{{ reference_docs_url }}" >}}
-* {{< link text="Standardized Glossary" url="/docs/reference/glossary/" >}}
-
-In addition, {{< link text="the Kubernetes Blog" url="https://kubernetes.io/blog/" >}} often has helpful posts on Kubernetes design patterns and case studies.
-
-#### What's next
-
-If you feel fairly comfortable with the topics on this page and want to learn more, check out the following user journeys:
-
-* {{< link text="Advanced App Developer" url="/docs/user-journeys/users/application-developer/advanced/" >}} - Dive deeper, with the next level of this journey.
-* {{< link text="Foundational Cluster Operator" url="/docs/user-journeys/users/cluster-operator/foundational/" >}} - Build breadth, by exploring other journeys. {{% /capture %}}
+{{% /capture %}}
